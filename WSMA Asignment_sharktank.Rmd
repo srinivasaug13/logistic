@@ -1,0 +1,579 @@
+---
+output: word_document
+fontsize: 10pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE, message=FALSE)
+```
+
+#1.	Problem Statement
+
+Predict Deal or No Deal based on the pitches made by the entrepreners to the VC Sharks
+
+
+#2. Loading Dataset
+
+
+```{r}
+#Load the Shark Tank Dataset
+shark_tank <- read.csv("C:/Users/Sharanya Kumar/Downloads/Shark+Tank+Companies.csv", stringsAsFactors=FALSE)
+summary(shark_tank)
+```
+
+For our analysis, we need to deal with Decision Variable "deal", and other independent variables like "description", "asked for" and "valuation"
+
+We can see the Decision variable is balanced
+
+
+Setting the values for Deal as 0 (False) and 1 (True)
+
+
+```{r}
+shark_tank$deal <- as.factor(ifelse(shark_tank$deal == "TRUE",1,0))
+table(shark_tank$deal)
+```
+
+#3.	DTM (Document Text Matrix)
+# TDM ( Term Document Matrix )
+
+The dataset variables description. To use the tm package we first transfrom the dataset to a corpus:
+
+
+```{r}
+#install.packages(c('tm', 'SnowballC', 'wordcloud', 'topicmodels'))
+library(tm)
+library(SnowballC)
+library(wordcloud)
+install.packages('textstem')
+library(textstem)
+
+corpus <- Corpus(VectorSource(shark_tank$description))
+```
+
+
+First review looks like
+
+```{r}
+inspect(corpus[5])
+```
+
+
+Next we normalize the texts in the description using a series of pre-processing steps: 1. Switch to lower case 2. Remove numbers 3. Remove punctuation marks and stopwords 4. Remove extra whitespaces
+
+
+```{r}
+
+skipWords <- function(x) removeWords(x, c("also","can", stopwords("english")))
+
+#funcs <- list(tolower, skipWords, removePunctuation, removeNumbers, 
+#              stripWhitespace, stemDocument)
+funcs <- list(tolower, removePunctuation, removeNumbers, 
+              stripWhitespace,lemmatize_strings)
+
+corpus <- tm_map(corpus, FUN = tm_reduce, tmFuns = funcs)
+# tm_reduce - Folds multiple transformations into a single one
+
+corpus <-tm_map(corpus,skipWords)
+#corpus = lemmatize_words(corpus)
+corpus <-tm_map(corpus,stripWhitespace)
+
+#After the above transformations the first review looks like
+inspect(corpus[5])
+```
+
+
+To analyze the textual data, we use a Document-Term Matrix (DTM) representation: documents as the rows, terms/words as the columns, frequency of the term in the document as the entries. Because the number of unique words in the corpus the dimension can be large.
+
+
+```{r}
+dtm_Shark_tank = DocumentTermMatrix(corpus)
+dtm_Shark_tank
+```
+
+
+Review Dataset to see for dumensions which are less frequent.
+
+```{r}
+inspect(dtm_Shark_tank[400:410, 400:410])
+```
+
+
+To reduce the dimension of the DTM, we can remove the less frequent terms such that the sparsity is less than 0.99
+
+```{r}
+dtm_Shark_tank <- removeSparseTerms(dtm_Shark_tank, 0.99)
+dtm_Shark_tank
+```
+
+
+The first review now looks like
+
+```{r}
+inspect(dtm_Shark_tank[400:410, 400:410])
+```
+
+
+We can draw a simple word cloud
+
+```{r}
+
+findFreqTerms(dtm_Shark_tank, 30,1000)
+
+freq = data.frame(sort(colSums(as.matrix(dtm_Shark_tank)), decreasing=TRUE))
+wordcloud(rownames(freq), freq[,1], max.words=100, colors=brewer.pal(1, "Dark2"))
+```
+
+
+
+
+
+#4. Predictive modeling
+
+
+**Creating Dataframe for DTM**
+
+```{r}
+Sparse_Shark <- as.data.frame(as.matrix(dtm_Shark_tank))
+
+
+# Make all variable names R-friendly
+colnames(Sparse_Shark) = make.names(colnames(Sparse_Shark))
+```
+
+
+**Add dependent variable**
+
+```{r}
+Sparse_Shark$Deal = shark_tank$deal
+Sparse_Shark$Deal=as.factor(Sparse_Shark$Deal)
+summary(Sparse_Shark$Deal)
+```
+
+
+**Dividing Test and Train dataset**
+
+```{r}
+id_train <- sample(nrow(Sparse_Shark),nrow(Sparse_Shark)*0.80)
+train <- Sparse_Shark[id_train,]
+test <- Sparse_Shark[-id_train,]
+```
+
+
+##4.1. CART MODEL
+
+###Train and Test Data 
+
+```{r}
+#install.packages(c('rpart', 'rpart.plot', 'e1071', 'nnet'))
+library(rpart)
+library(rpart.plot)
+library(caret)
+
+set.seed(111)
+CART_Shark <- rpart(Deal ~ ., data=train, method="class",control = rpart.control(cp = 0.0001))
+printcp(CART_Shark)
+```
+
+
+Prediction error rate in training data = (Root node error * rel error ) 100%
+Prediction error rate in cross-validation = (Root node error * xerror ) 100%
+Hence we want the cp value (with a simpler tree) that minimizes the xerror. 
+
+
+**Prune the tree using the best cp.**
+
+```{r}
+bestcp <- CART_Shark$cptable[which.min(CART_Shark$cptable[,"xerror"]),"CP"]
+CART_Shark_pruned <- prune(CART_Shark, cp = bestcp)
+printcp(CART_Shark_pruned)
+```
+
+
+Pruning reduces the size of decision trees by removing sections of the tree that provide little power to classify instances. Pruning reduces the complexity of the final classifier, and hence improves predictive accuracy by the reduction of overfitting. 
+
+
+**Tree View for CART Model**
+
+```{r}
+prp(CART_Shark_pruned,faclen = 0, cex = 0.5, extra = 1)
+#title("Tree (Non Pruned)")
+```
+
+faclen = 0 means to use full names of the factor labels
+extra = 1 adds number of observations at each node
+
+
+```{r}
+plot(CART_Shark_pruned,uniform=TRUE, 
+     main="Classification Tree (Pruned)",cex=.8)
+text(CART_Shark_pruned, cex = 0.8, use.n = TRUE, xpd = TRUE)
+
+```
+
+use.n = TRUE adds number of observations at each node
+xpd = TRUE keeps the labels from exteding outside the plot
+
+
+**Making Prediction using CART**
+
+```{r}
+pred_CART <-  predict(CART_Shark_pruned,test,type="class")
+```
+
+
+**Evaluate performance with the test set**
+
+```{r}
+table(test$Deal,pred_CART,dnn=c("Actual","Prediction"))
+error <- mean(ifelse(test$Deal != pred_CART, 1, 0))*100
+error
+```
+
+`r error`% of data is wrongly predicted by dividing the data.
+
+
+##4.2 Logistic Regresion Model
+
+###Train and Test Data 
+
+```{r}
+set.seed(111)
+library(caTools)
+install.packages('arm')
+library(arm)
+library(glmnet)
+
+Log_Shark <- glm(Deal~.,data=train,family="binomial"(link = "logit"),control = list(maxit = 500))
+
+
+#x= as.matrix(train[,-852])
+#y=train$Deal
+#Log_Shark = cv.glmnet(x,y,alpha=1, family = "binomial",type.measure = "class" )
+#plot(Log_Shark)
+#pred_log <- as.numeric(predict(Log_Shark, data.matrix(test[,-852]), type = "response") > 0.5)
+#print(Log_Shark)
+# Error in convergence
+
+#Log_Shark <- bayesglm(Deal~.,data=train,family="binomial",control = list(maxit = 500))
+
+```
+
+
+**Predication based on Logistic Regression**
+
+```{r}
+pred_log <- as.numeric(predict(Log_Shark,test,type="response") > 0.5)
+
+```
+
+
+**Evaluate performance with the test for logistic regression:**
+
+```{r}
+
+table(test$Deal,pred_log,dnn=c("Actual","Prediction"))
+error <- mean(ifelse(test$Deal != pred_log, 1, 0))*100
+error
+```
+
+`r error` % of data is wrongly predicted using logistic regression.
+
+
+
+
+
+
+##4.3 Random Forest
+
+###Train and Test Dataset
+
+```{r}
+library(randomForest)
+set.seed(111)
+RF_Shark <-  randomForest(Deal~.,data=train,importance=TRUE, ntree=500)
+print(RF_Shark)
+```
+
+
+**varImPlot for Random Forest**
+
+```{r}
+varImpPlot(RF_Shark,sort=TRUE,type=NULL, class=NULL, scale=TRUE,cex=.8)
+```
+
+Mean Decrease in Accuracy
+Mean Decrease in Node Impurity
+
+
+**Predictaion Based on random Forest**
+
+```{r}
+pred_RF <- (predict(RF_Shark,test,type="response"))
+```
+
+
+**Evaluate performance with the test for Random Forest**
+
+```{r}
+table(test$Deal,pred_RF,dnn=c("Actual","Prediction"))
+error <- mean(ifelse(test$Deal != pred_RF, 1, 0))*100
+error
+```
+
+`r error` % of data is wrongly predicted.
+
+
+#5. Predictive Modelling After adding variable "ratio"
+
+**This variable is "askedfor/valuation"**
+
+```{r}
+Sparse_Shark_New <- Sparse_Shark
+Sparse_Shark_New$ratio <- (shark_tank$askedFor/shark_tank$valuation)
+```
+
+
+**Dividing Data into Train and Test**
+
+```{r}
+id_train <- sample(nrow(Sparse_Shark_New),nrow(Sparse_Shark_New)*.80)
+train1 <- Sparse_Shark_New[id_train,]
+test1 <- Sparse_Shark_New[-id_train,]
+
+dim(train1)
+dim(test1)
+```
+
+
+##5.1. CART Model (with ratio)
+
+### Train and Test Dataset
+
+```{r}
+set.seed(111)
+CART_Shark <- rpart(Deal ~ ., data=train1, method="class",control = rpart.control(cp = 0.0001))
+printcp(CART_Shark)
+```
+
+
+**Prune the tree using the best cp.**
+
+```{r}
+bestcp <- CART_Shark$cptable[which.min(CART_Shark$cptable[,"xerror"]),"CP"]
+CART_Shark_pruned <- prune(CART_Shark, cp = bestcp)
+printcp(CART_Shark_pruned)
+```
+
+
+
+**Tree View for CART Model**
+
+```{r}
+prp(CART_Shark,faclen = 0, cex = 0.5, extra = 1)
+#title("Tree (non Pruned)")
+```
+
+
+```{r}
+plot(CART_Shark,uniform=TRUE, 
+     main="Classification Tree (non Pruned)",cex=.8)
+text(CART_Shark, cex = 0.8, use.n = TRUE, xpd = TRUE)
+```
+
+
+**Making Prediction using CART**
+
+```{r}
+pred_CART_N <-  predict(CART_Shark,test1,type="class")
+pred_CART_Prune_N <-  predict(CART_Shark_pruned,test1,type="class")
+```
+
+
+**Evaluate performance with the test set:**
+
+```{r}
+table(test1$Deal,pred_CART_N,dnn=c("Actual","Prediction"))
+error <- mean(ifelse(test1$Deal != pred_CART_N, 1, 0))*100
+error
+```
+
+`r error` % of data is wrongly predicted.
+
+
+
+
+##5.2. Logistic Regresion Model (with ratio)
+
+### Train and Test
+
+```{r}
+set.seed(111)
+#Log_Shark <- bayesglm(Deal~.,data=train1,family="binomial",control = list(maxit = 500))
+Log_Shark <- glm(Deal~.,data=train1,family="binomial"(link = "logit"),control = list(maxit = 500))
+```
+
+
+**Making Prediction using Logistic Regression**
+
+```{r}
+pred_log_N <- as.numeric(predict(Log_Shark,test1,type="response") > 0.5)
+```
+
+
+**Evaluate performance with the test set Losgistic Regression:**
+
+```{r}
+table(test1$Deal,pred_log_N,dnn=c("Actual","Prediction"))
+error <- mean(ifelse(test1$Deal != pred_log_N, 1, 0))
+error
+```
+
+`r error` % of data is wrongly predicted.
+
+
+
+
+##5.3. Random Forest (with ratio)
+
+###Train and Test dataset
+
+```{r}
+set.seed(111)
+RF_Shark <-  randomForest(Deal~.,data=train1,importance=TRUE, ntree=500)
+print(RF_Shark)
+```
+
+
+**varImPlot **
+
+```{R}
+varImpPlot(RF_Shark,sort=TRUE,type=NULL, class=NULL, scale=TRUE,cex=.8)
+```
+
+
+**Prediction using Random Forest**
+
+```{r}
+pred_RF_N <- (predict(RF_Shark,test1,type="response"))
+```
+
+
+**Evaluate performance with the test set Random Forest:**
+
+```{r}
+table(test1$Deal,pred_RF_N,dnn=c("Actual","Prediction"))
+error <- mean(ifelse(test1$Deal != pred_RF_N, 1, 0))*100
+error
+```
+
+`r error` % of data is wrongly predicted.
+
+
+#6. Confusion Matrix and ROC Curve for Models
+
+A confusion matrix is a specific table layout that allows visualization of the performance of an algorithm. Each row of the matrix represents the instances in a predicted class while each column represents the instances in an actual class (or vice versa).
+It is a special kind of contingency table, with two dimensions ("actual" and "predicted"), and identical sets of "classes" in both dimensions (each combination of dimension and class is a variable in the contingency table).
+
+
+Receiver Operating Characteristic (ROC) curves are a popular way to visualize the tradeoffs between sensitivitiy and specificity in a binary classifier.
+
+TPR = sensitivity = TP/(TP/FN)
+
+FPR = 1 - specificity = 1 - (TN/(FP+TN)) 
+
+
+##6.1. Generating Confusoin Matrix
+**CART Model**
+
+*Train Test Data*
+
+```{r}
+library(caret)
+C1 <- confusionMatrix(test$Deal,pred_CART)
+C2 <- confusionMatrix(test1$Deal,pred_CART_N)
+```
+
+
+**Logistic Regression Model**
+
+*Train and Test Dataset*
+
+```{r}
+L1 <- confusionMatrix(as.factor(test$Deal),as.factor(pred_log))
+L2 <- confusionMatrix(as.factor(test1$Deal),as.factor(pred_log_N))
+```
+
+
+**Random Forest Model**
+
+*Train and Test Dataset*
+
+```{r}
+R1 <- confusionMatrix(test$Deal,pred_RF)
+R2 <- confusionMatrix(test1$Deal,pred_RF_N)
+```
+
+
+##6.2. Plot Confusion Matrix and ROC Curve
+
+**Train & Test Dataset**
+
+```{r echo=FALSE,fig.align="center"}
+library(ROCR)
+install.packages('AUC')
+library(AUC)
+
+# CART without ratio
+AUC.C1 <- auc(roc(as.numeric(levels(pred_CART))[pred_CART], test$Deal))
+
+
+print(data.frame("Accuracy" = round(C1$overall[1],2),"Kappa" = round(C1$overall[2],2),"Senstivity" = round(C1$byClass[1],2),"Specificity" = round(C1$byClass[2],2),"AUC" = round(AUC.C1,4),"NIR" = round(C1$overall[5],2), row.names = NULL))
+
+
+# CART with ratio
+AUC.C2 <- auc(roc(as.numeric(levels(pred_CART_N))[pred_CART_N], test1$Deal))
+
+
+print(data.frame("Accuracy" = round(C2$overall[1],2),"Kappa" = round(C2$overall[2],2),"Senstivity" = round(C2$byClass[1],2),"Specificity" = round(C2$byClass[2],2),"AUC" = round(AUC.C2,4),"NIR" = round(C2$overall[5],2),row.names = NULL))
+
+
+# Logistic without Ratio
+
+AUC.L1 <- auc(roc(pred_log, test$Deal))
+
+
+print(data.frame("Accuracy" = round(L1$overall[1],2),"Kappa" = round(L1$overall[2],2),"Senstivity" = round(L1$byClass[1],2),"Specificity" = round(L1$byClass[2],2),"AUC" = round(AUC.L1,4),"NIR" = round(L1$overall[5],2),row.names = NULL))
+
+# Logistic with ratio
+
+AUC.L2 <- auc(roc(pred_log_N, test1$Deal))
+
+
+print(data.frame("Accuracy" = round(L2$overall[1],2),"Kappa" = round(L2$overall[2],2),"Senstivity" = round(L2$byClass[1],2),"Specificity" = round(L2$byClass[2],2),"AUC" = round(AUC.L2,4),"NIR" = round(L2$overall[5],2),row.names = NULL))
+
+# Random Forest without ratio :
+
+AUC.R1 <- auc(roc(as.numeric(levels(pred_RF))[pred_RF], test$Deal))
+
+
+print(data.frame("Accuracy" = round(R1$overall[1],2),"Kappa" = round(R1$overall[2],2),"Senstivity" = round(R1$byClass[1],2),"Specificity" = round(R1$byClass[2],2),"AUC" = round(AUC.R1,4),"NIR" = round(R1$overall[5],2),row.names = NULL))
+
+# Random Forest with ratio
+AUC.R2 <- auc(roc(as.numeric(levels(pred_RF_N))[pred_RF_N], test1$Deal))
+
+
+print(data.frame("Accuracy" = round(R2$overall[1],2),"Kappa" = round(R2$overall[2],2),"Senstivity" = round(R2$byClass[1],2),"Specificity" = round(R2$byClass[2],2),"AUC" = round(AUC.R2,4),"NIR" = round(R2$overall[5],2),row.names = NULL))
+
+```
+
+
+
+#7. Interpretation
+
+**Based on Train and Test Dataset**
+
+
+
+
+

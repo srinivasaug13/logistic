@@ -1,0 +1,80 @@
+
+To begin, we will load some German Credit data.
+
+
+```{r}
+
+rm(list=ls())
+set.seed(248)#this is for consistency in testing
+#the bigger dataset using only numbers
+setwd("D:/Academic Operations/Machine Learning/Ensemble Methods/week 3/RMarkdown")
+germanData <- read.csv("creditcard.csv", header=T)
+
+#let's see what the outcome Class data looks like
+table(germanData$Class)
+```
+
+```{r}
+
+library(caTools)        #really just using this for the sample.split command
+split <- sample.split(germanData$Class, SplitRatio = 0.90)#here ware splitting it based on the Class column
+gd <- subset(germanData, split == FALSE)
+View(gd)#now the 'gd' data frame has only around 28,000 rows with 31 columns
+table(gd$Class)
+#here we find that the ratio of not default and default is same as of the population data se
+
+split <- sample.split(gd$Class, SplitRatio = 0.75)
+#we are splitting the data such that we have 75% of the data is Train Data and 25% of the data is my Test Data
+
+
+gd_train <- subset(gd, split == TRUE)
+gd_test <- subset(gd, split == FALSE)
+
+#we can check the ratios of the minority class to majority class
+table(gd_train$Class)
+#even here we find that the ratio of not default and default is the same as our population data set
+
+table(gd_test$Class)#even here we find that the ratio of not default and default is the same as our population data set when we round off to the fifth decimal place
+#here we have a very small positive minority class
+```
+
+#logistic regression
+```{r}
+
+german_logistic <- glm(Class~., data=gd_train, family=binomial(link="logit"))
+
+gd_test$log.pred<-predict(german_logistic, gd_test[1:30], type="response")
+#in the above line of code we have noted the results of the above two lines in the column called log.pred
+
+table(gd_test$Class,gd_test$log.pred>0.5)
+#we are comapring the predicted values and given values. Anything above 0.5 will be a yes from the above code
+
+```
+The above resut says that for our not default we predicted 7106 correctly.
+But when for the ones which did default we only predicted it correctly just for 12 times that it was going to default. The above confusion matrix might give us a very high probability of us being correct but we have to remember that we predicted most of the minority class wrongly.
+
+#knn
+```{r}
+#knn compare
+library(class)
+knn_fit<- knn(train = gd_train[,1:30], test = gd_test[,1:30], cl= gd_train[,31],k = 3,prob=TRUE)
+#here were have predicted the  minority class all wrong. But we still do have a high probability of being correct.
+#Is it a good model though?
+
+table(gd_test[,31],knn_fit)
+#KNN in this case is not a good algorithm to use in this case.
+
+```
+
+#naive bayes
+```{r}
+library(e1071)
+
+nb_gd<-naiveBayes(x=gd_train[,1:30], y=as.factor(gd_train[,31]))
+#do make sure that your dependent variable is a factor
+
+pred_nb<-predict(nb_gd,newdata = gd_test[,1:30])
+
+table(gd_test[,31],pred_nb)
+```
+Here, we see that the Naive-Bayes algorithm definitely works better than KNN.

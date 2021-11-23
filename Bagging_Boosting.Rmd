@@ -1,0 +1,156 @@
+```{r}
+
+#loading a few libraries
+install.packages('gbm')
+library(gbm)          # basic implementation using AdaBoost
+install.packages('xgboost')
+library(xgboost)      # a faster implementation of a gbm
+install.packages('caret')
+library(caret)        # an aggregator package for performing many machine learning models
+
+
+```
+
+## Bagging
+
+Let's start using bagging
+
+```{r}
+library(ipred)
+library(rpart)
+
+#we can modify the maxdepth and minsplit if needed
+#r doc, https://www.rdocumentation.org/packages/ipred/versions/0.4-0/topics/bagging
+German.bagging <- bagging(Class ~.,
+data=gd_train,
+control=rpart.control(maxdepth=5, minsplit=4))
+
+
+gd_test$pred.class <- predict(German.bagging, gd_test)
+
+
+#gd_test$pred.class<- ifelse(gd_test$pred.class<0.5,0,1)
+
+
+#confusionMatrix(data=factor(gd_test$pred.class),
+#                reference=factor(gd_test$Class),
+#                positive='1')
+
+table(gd_test$Class,gd_test$pred.class>0.5)#we are comapring our class with our predicted values
+```
+This is a much better model than the model that we had built with KNN.
+Bagging can help us only so much when we are using a data set that is such imbalanced.
+
+#Boosting
+
+Now let's try some general boosting techniques.
+
+```{r}
+
+gbm.fit <- gbm(
+  formula = Class ~ .,
+  distribution = "bernoulli",#we are using bernoulli because we are doing a logistic and want probabilities
+  data = gd_train,
+  n.trees = 10000, #these are the number of stumps
+  interaction.depth = 1,#number of splits it has to perform on a tree (starting from a single node)
+  shrinkage = 0.001,#shrinkage is used for reducing, or shrinking the impact of each additional fitted base-learner(tree)
+  cv.folds = 5,#cross validation folds
+  n.cores = NULL, # will use all cores by default
+  verbose = FALSE#after every tree/stump it is going to show the error and how it is changing
+)  
+
+gd_test$pred.class <- predict(gbm.fit, gd_test, type = "response")
+#we have to put type="response" just like in logistic regression else we will have log odds
+
+table(gd_test$Class,gd_test$pred.class>0.5)
+
+```
+
+
+```{r}
+
+# XGBoost works with matrices that contain all numeric variables
+# we also need to split the training data and label
+
+gd_features_train<-as.matrix(gd_train[,1:30])
+gd_label_train<-as.matrix(gd_train[,31])
+gd_features_test<-as.matrix(gd_test[,1:30])
+
+xgb.fit <- xgboost(
+  data = gd_features_train,
+  label = gd_label_train,
+  eta = 0.001,#this is like shrinkage in the previous algorithm
+  max_depth = 3,#Larger the depth, more complex the model; higher chances of overfitting. There is no standard                      value for max_depth. Larger data sets require deep trees to learn the rules from data.
+  min_child_weight = 3,#it blocks the potential feature interactions to prevent overfitting
+  nrounds = 10000,#controls the maximum number of iterations. For classification, it is similar to the number of                       trees to grow.
+  nfold = 5,
+  objective = "binary:logistic",  # for regression models
+  verbose = 0,               # silent,
+  early_stopping_rounds = 10 # stop if no improvement for 10 consecutive trees
+)
+
+#gd_features_test<-as.matrix(gd_features_test[,1:ncol(gd_features_test)-1])
+
+gd_test$xgb.pred.class <- predict(xgb.fit, gd_features_test)
+
+table(gd_test$Class,gd_test$xgb.pred.class>0.5)
+#this model was definitely better
+#or simply the total correct of the minority class
+sum(gd_test$Class==1 & gd_test$xgb.pred.class>=0.5)
+```
+
+```{r}
+#in this code chunk we will playing around with all the values untill we find the best fit
+#let's play with shrinkage, known as eta in xbg
+tp_xgb<-vector()
+lr <- c(0.001, 0.01, 0.1, 0.3, 0.5, 0.7, 1)
+md<-c(1,3,5,7,9,15)
+nr<-c(2, 50, 100, 1000, 10000)
+for (i in md) {
+  
+  xgb.fit <- xgboost(
+    data = gd_features_train,
+    label = gd_label_train,
+    eta = 0.7,
+    max_depth = 5,
+    nrounds = 50,
+    nfold = 5,
+    objective = "binary:logistic",  # for regression models
+    verbose = 1,               # silent,
+    early_stopping_rounds = 10 # stop if no improvement for 10 consecutive trees
+  )
+  
+  gd_test$xgb.pred.class <- predict(xgb.fit, gd_features_test)
+  
+  tp_xgb<-cbind(tp_xgb,sum(gd_test$Class==1 & gd_test$xgb.pred.class>=0.5))
+  #if your class=1 and our prediction=0.5, we are going to display it with the next line compare the same algorithm     for different values
+  
+}
+
+tp_xgb
+table(gd_test$Class,gd_test$xgb.pred.class>=0.5)
+#here there is significant imporvement over all the models that we ahve done so far
+```
+
+
+```{r}
+#now we put them all into our best fit!
+
+xgb.fit <- xgboost(
+  data = gd_features_train,
+  label = gd_label_train,
+  eta = 0.7,
+  max_depth = 5,
+  nrounds = 50,
+  nfold = 5,
+  objective = "binary:logistic",  # for regression models
+  verbose = 1,               # silent,
+  early_stopping_rounds = 10 # stop if no improvement for 10 consecutive trees
+)
+
+gd_test$xgb.pred.class <- predict(xgb.fit, gd_features_test)
+
+sum(gd_test$Class==1 & gd_test$xgb.pred.class>=0.5)
+
+
+```
