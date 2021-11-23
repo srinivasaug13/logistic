@@ -1,0 +1,284 @@
+---
+title: "Sentiment Analysis in Action"
+author: "Granger Huntress"
+date: "3/6/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+rm(list=ls())
+
+library(wordcloud)
+library(devtools)
+library(tidyverse)      
+library(stringr)        
+library(tidytext)
+library(dplyr)
+library(reshape2)
+library(igraph)
+library(ggraph)
+
+devtools::install_github("bradleyboehmke/harrypotter")
+library(harrypotter)
+```
+
+
+Let's load the books
+
+```{r}
+
+titles <- c("Philosopher's Stone", "Chamber of Secrets", "Prisoner of Azkaban",
+            "Goblet of Fire", "Order of the Phoenix", "Half-Blood Prince",
+            "Deathly Hallows")
+books <- list(philosophers_stone, chamber_of_secrets, prisoner_of_azkaban,
+              goblet_of_fire, order_of_the_phoenix, half_blood_prince,
+              deathly_hallows)
+##Each book is an array in which each value in the array is a chapter 
+series <- tibble()
+for(i in seq_along(titles)) {
+  
+  temp <- tibble(chapter = seq_along(books[[i]]),
+                  text = books[[i]]) %>%
+    unnest_tokens(word, text) %>%
+    ##Here we tokenize each chapter into words
+    mutate(book = titles[i]) %>%
+    select(book, everything())
+  
+  series <- rbind(series, temp)
+}
+# set factor to keep books in order of publication
+series$book <- factor(series$book, levels = rev(titles))
+series
+
+```
+
+```{r}
+
+series %>% count(word, sort = TRUE)
+
+```
+
+
+```{r}
+
+series$book <- factor(series$book, levels = rev(titles))
+series %>% 
+  anti_join(stop_words) %>%
+  count(word) %>%
+  with(wordcloud(word, n, max.words = 50))
+
+```
+
+
+```{r}
+
+series %>%
+  right_join(get_sentiments("nrc")) %>%
+  filter(!is.na(sentiment)) %>%
+  count(sentiment, sort = TRUE)
+
+```
+
+
+```{r}
+
+series %>%
+  right_join(get_sentiments("bing")) %>%
+  filter(!is.na(sentiment)) %>%
+  count(sentiment, sort = TRUE)
+
+
+```
+
+```{r}
+
+series %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("#F8766D", "#00BFC4"),
+                   max.words = 50)
+
+```
+
+
+```{r}
+
+series %>%
+  anti_join(stop_words) %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("#F8766D", "#00BFC4"),
+                   max.words = 50)
+
+```
+
+
+```{r}
+
+series %>%
+  group_by(book) %>% 
+  mutate(word_count = 1:n(),
+         index = word_count %/% 500 + 1) %>% 
+  inner_join(get_sentiments("bing")) %>%
+  count(book, index = index , sentiment) %>%
+  ungroup() %>%
+  spread(sentiment, n, fill = 0) %>%
+  mutate(sentiment = positive - negative,
+         book = factor(book, levels = titles)) %>%
+  ggplot(aes(index, sentiment, fill = book)) +
+  geom_bar(alpha = 0.5, stat = "identity", show.legend = FALSE) +
+  facet_wrap(~ book, ncol = 2, scales = "free_x")
+
+```
+
+
+```{r}
+
+series <- tibble()
+for(i in seq_along(titles)) {
+  
+  temp <- tibble(chapter = seq_along(books[[i]]),
+                  text = books[[i]]) %>%
+    unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+    ##Here we tokenize each chapter into bigrams
+    mutate(book = titles[i]) %>%
+    select(book, everything())
+  
+  series <- rbind(series, temp)
+}
+# set factor to keep books in order of publication
+series$book <- factor(series$book, levels = rev(titles))
+series
+
+```
+
+
+```{r}
+
+series %>%
+  count(bigram, sort = TRUE)
+
+
+```
+
+
+```{r}
+
+bigrams_separated <- series %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+bigrams_filtered <- bigrams_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word)
+# new bigram counts:
+bigrams_united <- bigrams_filtered %>%
+  unite(bigram, word1, word2, sep = " ")
+bigrams_united %>% 
+    count(bigram, sort = TRUE)
+
+
+```
+
+
+```{r}
+
+bigram_tf_idf <- bigrams_united %>%
+  count(book, bigram) %>%
+  bind_tf_idf(bigram, book, n) %>%
+  arrange(desc(tf_idf))
+bigram_tf_idf
+
+```
+
+```{r}
+
+plot_potter<- bigram_tf_idf %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(bigram = factor(bigram, levels = rev(unique(bigram))))
+plot_potter %>% 
+  top_n(20) %>%
+  ggplot(aes(bigram, tf_idf, fill = book)) +
+  geom_col() +
+  labs(x = NULL, y = "tf-idf") +
+  coord_flip()
+
+```
+
+
+```{r}
+
+bigrams_separated %>%
+  filter(word1 == "not") %>%
+  count(word1, word2, sort = TRUE)
+
+```
+
+
+```{r}
+bigrams_separated <- bigrams_separated %>%
+  filter(word1 == "not") %>%
+  filter(!word2 %in% stop_words$word)%>%
+  count(word1, word2, sort = TRUE)
+bigrams_separated
+
+```
+
+```{r}
+
+BING <- get_sentiments("bing")
+not_words <- bigrams_separated %>%
+  filter(word1 == "not") %>%
+  filter(!word2 %in% stop_words$word)%>%
+  inner_join(BING, by = c(word2 = "word")) %>%
+  ungroup()
+not_words
+
+```
+
+
+```{r}
+
+bigrams_filter<-bigrams_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word)
+bigrams_filter
+
+```
+
+```{r}
+
+bigrams_counts<-bigrams_filtered %>%
+  count(word1,word2,sort=TRUE)
+bigrams_counts
+
+```
+
+```{r}
+bigram_graph <- bigrams_counts %>%
+  filter(n > 70) %>%
+  graph_from_data_frame()
+bigram_graph
+
+```
+
+
+```{r}
+
+set.seed(2019)
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link() +
+  geom_node_point() +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1)
+
+```

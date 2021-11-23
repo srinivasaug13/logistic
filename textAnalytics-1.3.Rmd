@@ -1,0 +1,243 @@
+---
+title: "Text Analytics Intro with R"
+author: "Granger Huntress"
+date: "3/5/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction to Text Analytics using R
+
+Why Tidy?
+The concept of tidy data is data that is easy to work with.
+
+```{r}
+
+rm(list=ls())
+
+library(dplyr)
+library(stringr)
+library(tidytext)
+library(tidyr)
+
+```
+
+Let's begin with the first few sentences from the very first Harry Potter book, Harry Potter and the Philosopher's Stones. I am going to just take the words and make a simple vector out of them.
+
+```{r}
+
+wds<-"Mr. and Mrs. Dursley, of number four, Privet Drive, were proud to say that they were perfectly normal, thank you very much. They were the last people you'd expect to be involved in anything strange or mysterious, because they just didn't hold with such nonsense. Mr. Dursley was the director of a firm called Grunnings, which made drills. He was a big, beefy man with hardly any neck, although he did have a very large mustache. Mrs. Dursley was thin and blonde and had nearly twice the usual amount of neck, which came in very useful as she spent so much of her time craning over garden fences, spying on the neighbors."
+
+library(tm)
+
+docs <- Corpus(VectorSource(wds))
+dtm <- TermDocumentMatrix(docs)
+
+m <- as.matrix(dtm)
+v <- sort(rowSums(m),decreasing=TRUE)
+d <- data.frame(word = names(v),freq=v)
+
+head(d,10)
+
+```
+
+Now let's try stopping and stemming and see what happens
+
+```{r}
+
+doc2 <- tm_map(docs, removeWords, stopwords("english"))
+doc2<- tm_map(doc2, stemDocument, language = "english")
+dtm2 <- TermDocumentMatrix(doc2)
+
+
+m2 <- as.matrix(dtm2)
+v2 <- sort(rowSums(m2),decreasing=TRUE)
+d2 <- data.frame(word = names(v2),freq=v2)
+
+head(d2,10)
+
+```
+
+and even more words.
+
+
+```{r}
+
+library(devtools)
+devtools::install_github("bradleyboehmke/harrypotter")
+library(harrypotter)
+
+philosophers_stone[[1]]
+
+```
+
+Now let's see what happens when we stop and stem the entire first chapter!
+
+```{r}
+
+hp_doc<-Corpus(VectorSource(philosophers_stone[[1]]))
+
+hp_dtm <- TermDocumentMatrix(hp_doc)
+
+hp_m <- as.matrix(hp_dtm)
+hp_v <- sort(rowSums(hp_m),decreasing=TRUE)
+hp_d <- data.frame(word = names(hp_v),freq=hp_v)
+
+head(hp_d,10)
+
+```
+
+Now we stop and stem the entire chapter.
+
+```{r}
+
+hp_doc2 <- tm_map(hp_doc, removeWords, stopwords("english"))
+hp_doc2<- tm_map(hp_doc2, stemDocument, language = "english")
+hp_dtm2 <- TermDocumentMatrix(hp_doc2)
+
+
+hp_m2 <- as.matrix(hp_dtm2)
+hp_v2 <- sort(rowSums(hp_m2),decreasing=TRUE)
+hp_d2 <- data.frame(word = names(hp_v2),freq=hp_v2)
+
+head(hp_d2,10)
+
+```
+
+
+```{r}
+
+
+hp_doc3 <- tm_map(hp_doc, removePunctuation)
+hp_doc3 <- tm_map(hp_doc3, content_transformer(tolower))
+hp_doc3 <- tm_map(hp_doc3, content_transformer(removeNumbers))
+hp_doc3 <- tm_map(hp_doc3, stripWhitespace)
+
+```
+
+```{r}
+
+all_stops<-c(stopwords("english"), "said","mr.", "mrs.")
+hp_doc3 <- tm_map(hp_doc3, removeWords, all_stops)
+hp_doc3<- tm_map(hp_doc3, stemDocument, language = "english")
+hp_dtm3 <- TermDocumentMatrix(hp_doc3)
+
+```
+
+```{r}
+
+hp_m3 <- as.matrix(hp_dtm3)
+hp_v3 <- sort(rowSums(hp_m3),decreasing=TRUE)
+hp_d3 <- data.frame(word = names(hp_v3),freq=hp_v3)
+
+head(hp_d3,10)
+
+
+```
+
+Combining all of the chapters into one corpus of the entire book.
+
+```{r}
+
+complete_phil<-vector()
+for (i in 1:length(philosophers_stone)){
+  complete_phil<-rbind(complete_phil,philosophers_stone[[i]])
+  
+}
+
+```
+
+```{r}
+
+ps_doc <- Corpus(VectorSource(complete_phil))
+ps_doc <- tm_map(ps_doc, removePunctuation)
+ps_doc <- tm_map(ps_doc, content_transformer(tolower))
+ps_doc <- tm_map(ps_doc, content_transformer(removeNumbers))
+ps_doc <- tm_map(ps_doc, stripWhitespace)
+
+all_stops<-c(stopwords("english"), "said","mr.", "mrs.")
+ps_doc <- tm_map(ps_doc, removeWords, all_stops)
+ps_doc<- tm_map(ps_doc, stemDocument, language = "english")
+
+ps_tdm <- TermDocumentMatrix(ps_doc)
+ps_m <- as.matrix(ps_tdm)
+ps_v <- sort(rowSums(ps_m),decreasing=TRUE)
+ps_d <- data.frame(word = names(ps_v),freq=ps_v)
+
+head(ps_d,10)
+
+```
+
+TDM v DTM
+
+```{r}
+
+ps_TDM<-TermDocumentMatrix(ps_doc)
+
+ps_DTM<-DocumentTermMatrix(ps_doc)
+
+dim(ps_DTM)
+dim(ps_TDM)
+
+```
+
+```{r}
+
+ps_TDM
+
+```
+
+
+```{r}
+
+ps_m<-as.matrix(ps_TDM)
+term_frequency<-rowSums(ps_m)
+term_frequency<-sort(term_frequency, decreasing = TRUE)
+barplot(term_frequency[1:15],col = "tan", las=2)
+
+```
+
+
+
+```{r}
+
+new_tdm<-removeSparseTerms(ps_TDM, sparse = 0.95)
+new_tdm
+
+```
+
+
+```{r}
+
+
+tdm_m<-as.matrix(new_tdm)
+tdm_df<-as.data.frame(tdm_m)
+ps_dist<-dist(tdm_df, method = "euclidean")
+hc<-hclust(ps_dist)
+plot(hc)
+
+```
+
+Cleaning up the dendrogram
+```{r}
+
+tdm <- ps_tdm[names(tail(sort(rowSums(as.matrix(ps_tdm))), 50)), ]
+
+new_tdm<-removeSparseTerms(tdm, sparse = 0.95)
+
+
+```
+
+
+```{r}
+
+tdm_m<-as.matrix(new_tdm)
+tdm_df<-as.data.frame(tdm_m)
+ps_dist<-dist(tdm_df, method = "euclidean")
+hc<-hclust(ps_dist)
+plot(hc)
+
+```
